@@ -8,7 +8,7 @@
  * @package     Blade
  * @category    Libraries
  * @version     1.0.2
- * @url         https://github.com/laperla/codeigniter-Blade 
+ * @url         https://github.com/laperla/codeigniter-Blade
  *
  */
 class Blade
@@ -22,12 +22,19 @@ class Blade
     protected $_compilers = array(
         'extensions',
         'comments',
+        'escaped_echos',
+        'js_expressions',
+        'echos',
         'echos',
         'forelse',
         'empty',
         'endforelse',
         'structure_openings',
         'structure_closings',
+        'switch',
+        'case',
+        'default_case',
+        'break',
         'else',
         'unless',
         'endunless',
@@ -203,6 +210,16 @@ class Blade
         return $content;
     }
 
+    /**
+     * Output default 404 page.
+     *
+     * @return string
+     */
+    public function err_404()
+    {
+        return exit($this->render('404'));
+    }
+
 
     /**
      * Find the full path to a view file. Shows an error if file not found.
@@ -257,7 +274,7 @@ class Blade
             {
                 return $compiled;
             }
-                    
+
             // Return cache version if the template was not updated
             $meta = $this->cache->file->get_metadata($cache_id);
             if ($meta['mtime'] > filemtime($view_path))
@@ -299,6 +316,7 @@ class Blade
         }
 
         ob_start();
+
         eval(' ?>' . $template . '<?php ');
         $content = ob_get_clean();
 
@@ -316,6 +334,8 @@ class Blade
      */
     protected function _include($template, $data = NULL)
     {
+        $template = str_replace('.','/',$template);
+
         // Merge local data with global data
         $data = isset($data) ? array_merge($this->_data, $data) : $this->_data;
 
@@ -415,6 +435,27 @@ class Blade
         return preg_replace('/\{\{--((.|\s)*?)--\}\}/', "<?php /* $1 */ ?>\n", $value);
     }
 
+    /**
+     * Rewrites Blade escaped echo statements into PHP escaped echo statements.
+     *
+     * @param  string  $value
+     * @return string
+     */
+    protected function _compile_escaped_echos($value)
+    {
+        return preg_replace('/(?<!\{|@)\{\{(.+?)\}\}(?!\})/', '<?php echo addslashes($1); ?>', $value);
+    }
+
+    /**
+     * Rewrites Blade JavaScript expressions into regular JavaScript expressions.
+     *
+     * @param  string  $value
+     * @return string
+     */
+    protected function _compile_js_expressions($value)
+    {
+        return preg_replace('/(?<!\{)@\{\{\s*(.+?)\s*\}\}(?!\})/', '{{ $1 }}', $value);
+    }
 
     /**
      * Rewrites Blade echo statements into PHP echo statements.
@@ -424,7 +465,7 @@ class Blade
      */
     protected function _compile_echos($value)
     {
-        return preg_replace('/\{\{(.+?)\}\}/', '<?php echo $1; ?>', $value);
+        return preg_replace('/\{\!\!(.+?)\!\!\}/', "<?php echo $1 ?>", $value);
     }
 
 
@@ -509,11 +550,63 @@ class Blade
      */
     protected function _compile_structure_closings($value)
     {
-        $pattern = '/(\s*)@(endif|endforeach|endfor|endwhile)(\s*)/';
+        $pattern = '/(\s*)@(endif|endforeach|endfor|endwhile|endswitch)(\s*)/';
 
         return preg_replace($pattern, '$1<?php $2; ?>$3', $value);
     }
 
+    /**
+     * Rewrites Blade switch statements into PHP switch statements.
+     *
+     * @param  string  $value
+     * @return string
+     */
+    protected function _compile_switch($value)
+    {
+        $pattern = '/(\s*)@(switch)(\s*\(.*\))(\s*)@(case)(\s*)\((.*)\)/';
+
+        return preg_replace($pattern, '$1<?php $2$3:$4 $5 $6$7: ?>', $value);
+    }
+
+
+    /**
+     * Rewrites Blade case statements into PHP case statements.
+     *
+     * @param  string  $value
+     * @return string
+     */
+    protected function _compile_case($value)
+    {
+        $pattern = '/(\s*)@(case)(\s*)\((.*)\)/';
+
+        return preg_replace($pattern, '$1<?php $2 $3$4: ?>', $value);
+    }
+
+    /**
+     * Rewrites Blade default statements into PHP default statements.
+     *
+     * @param  string  $value
+     * @return string
+     */
+    protected function _compile_default_case($value)
+    {
+        $pattern = '/(\s*)@(default)(\s*)/';
+
+        return preg_replace($pattern, '$1<?php $2: ?>$3', $value);
+    }
+
+    /**
+     * Rewrites Blade break statements into PHP break statements.
+     *
+     * @param  string  $value
+     * @return string
+     */
+    protected function _compile_break($value)
+    {
+        $pattern = '/(\s*)@(break)(\s*)/';
+
+        return preg_replace($pattern, '$1<?php $2; ?>$3', $value);
+    }
 
     /**
      * Rewrites Blade else statements into PHP else statements.
@@ -585,7 +678,7 @@ class Blade
 
 
     /**
-     * Rewrites Blade "@layout" expressions into valid PHP.
+     * Rewrites Blade "@layout" and "@extends" expressions into valid PHP.
      *
      * @param  string  $value
      * @return string
@@ -593,15 +686,22 @@ class Blade
     protected function _compile_layouts($value)
     {
         $pattern = $this->matcher('layout');
+        $pattern2 = $this->matcher('extends');
 
         // Find "@layout" expressions
-        if ( ! preg_match_all($pattern, $value, $matches, PREG_SET_ORDER))
+        if ( ! preg_match_all($pattern, $value, $matches, PREG_SET_ORDER) && ! preg_match_all($pattern2, $value, $matches, PREG_SET_ORDER))
         {
             return $value;
         }
 
-        // Delete "@layout" expressions
-        $value = preg_replace($pattern, '', $value);
+        // Delete "@layout" or "@extends" expressions
+        if (preg_match_all($pattern, $value, $matches, PREG_SET_ORDER)) {
+            $value = preg_replace($pattern, '', $value);
+        }
+        elseif (preg_match_all($pattern2, $value, $matches, PREG_SET_ORDER)) {
+            $value = preg_replace($pattern2, '', $value);
+        }
+
 
         // Include layouts at the end of template
         foreach ($matches as $set)
