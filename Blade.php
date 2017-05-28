@@ -198,6 +198,8 @@ class Blade
             $this->set_data($data);
         }
 
+        $template = str_replace('.','/',$template);
+
         // Compile and run template
         $compiled = $this->_compile($template);
         $content = $this->_run($compiled, $this->_data);
