@@ -203,6 +203,7 @@ class Blade
         // Compile and run template
         $compiled = $this->_compile($template);
         $content = $this->_run($compiled, $this->_data);
+        $content = trim($content);
 
         if ( ! $return)
         {
